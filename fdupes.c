@@ -51,6 +51,7 @@
 
 long long minsize = -1;
 long long maxsize = -1;
+long long filesize = -1;
 
 typedef enum {
   ORDER_MTIME = 0,
@@ -301,6 +302,13 @@ int grokdir(char *dir, file_t **filelistp, struct stat *logfile_status)
         free(newfile->d_name);
         free(newfile);
         continue;
+      }
+
+      if (info.st_size == filesize)
+      {
+	free(newfile->d_name);
+	free(newfile);
+	continue;
       }
 
       /* ignore logfile */
@@ -1231,6 +1239,7 @@ void help_text()
   printf(" -l --log=LOGFILE        log file deletion choices to LOGFILE\n");
   printf(" -v --version            display fdupes version\n");
   printf(" -h --help               display this help message\n\n");
+  printf(" -z --filesize=SIZE	   exclude SIZE bytes files\n");
 #ifndef HAVE_GETOPT_H
   printf("Note: Long options are not supported in this fdupes build.\n\n");
 #endif
@@ -1283,6 +1292,7 @@ int main(int argc, char **argv) {
     { "order", 1, 0, 'o' },
     { "reverse", 0, 0, 'i' },
     { "log", 1, 0, 'l' },
+    { "filesize", 1, 0, 'z' },
     { 0, 0, 0, 0 }
   };
 #define GETOPT getopt_long
@@ -1392,6 +1402,14 @@ int main(int argc, char **argv) {
       break;
     case 'l':
       logfile = optarg;
+      break;
+    case 'z':
+      filesize = strtoll(optarg, &endptr, 10);
+      if (optarg[0] == '\0' || *endptr != '\0' || filesize < 0)
+      {
+	errormsg("invalid value for --filesize: '%s'\n", optarg);
+	exit(1);
+      }
       break;
     default:
       fprintf(stderr, "Try `fdupes --help' for more information.\n");
