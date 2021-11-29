@@ -52,6 +52,8 @@
 long long minsize = -1;
 long long maxsize = -1;
 long long filesize = -1;
+long long datebefore = -1;
+long long dateafter = -1;
 
 typedef enum {
   ORDER_MTIME = 0,
@@ -228,7 +230,6 @@ int grokdir(char *dir, file_t **filelistp, struct stat *logfile_status)
   static int progress = 0;
   static char indicator[] = "-\\|/";
   char *fullname, *name;
-
   cd = opendir(dir);
 
   if (!cd) {
@@ -311,9 +312,59 @@ int grokdir(char *dir, file_t **filelistp, struct stat *logfile_status)
 	continue;
       }
 
-      /* ignore logfile */
-      if (info.st_dev == logfile_status->st_dev && info.st_ino == logfile_status->st_ino)
-      {
+      struct tm *filetime;
+      filetime = localtime(&info.st_mtime);
+      long long year = filetime->tm_year + 1900;
+      long long month = filetime->tm_mon + 1;
+      long long day = filetime->tm_mday;
+
+      if(datebefore != -1){
+        long long db_year = datebefore / 10000;
+        long long db_month = datebefore / 100 - db_year * 100;
+        long long db_day = datebefore % 100;
+
+        if (year > db_year) {
+          free(newfile->d_name);
+          free(newfile);
+          continue;
+        }
+        else if (year == db_year && month > db_month) {
+          free(newfile->d_name);
+          free(newfile);
+          continue;
+        }
+        else if (year == db_year && month == db_month && day > db_day) {
+          free(newfile->d_name);
+          free(newfile);
+          continue;
+        }
+      }
+
+      if(dateafter != -1){
+        long long da_year = dateafter / 10000;
+        long long da_month = dateafter / 100 - da_year * 100;
+        long long da_day = dateafter % 100;
+
+        if (year < da_year) {
+          free(newfile->d_name);
+          free(newfile);
+          continue;
+        }
+        else if (year == da_year && month < da_month) {
+          free(newfile->d_name);
+          free(newfile);
+          continue;
+        }
+        else if (year == da_year && month == da_month && day < da_day) {
+          free(newfile->d_name);
+          free(newfile);
+          continue;
+        }
+      }
+
+
+ /* ignore logfile */
+      if (info.st_dev == logfile_status->st_dev && info.st_ino == logfile_status->st_ino) {
         free(newfile->d_name);
         free(newfile);
         continue;
@@ -1240,6 +1291,10 @@ void help_text()
   printf(" -v --version            display fdupes version\n");
   printf(" -h --help               display this help message\n\n");
   printf(" -z --filesize=SIZE	   exclude SIZE bytes files\n");
+  printf(" -b --datebefore=DATE    delete dupe files when it's modification time is before the DATE\n");
+  printf("                         ex) Nov 5 2021 -> 20211105\n");
+  printf(" -a --dateafter=DATE     delete dupe files when it's modification time is after the DATE\n");
+  printf("                         ex) Nov 5 2021 -> 20211105\n");
 #ifndef HAVE_GETOPT_H
   printf("Note: Long options are not supported in this fdupes build.\n\n");
 #endif
@@ -1263,7 +1318,9 @@ int main(int argc, char **argv) {
   int log_error;
   struct stat logfile_status;
   char *endptr;
-  
+  int datebeforelength = 0;
+  int dateafterlength = 0;
+
 #ifdef HAVE_GETOPT_H
   static struct option long_options[] = 
   {
@@ -1293,6 +1350,8 @@ int main(int argc, char **argv) {
     { "reverse", 0, 0, 'i' },
     { "log", 1, 0, 'l' },
     { "filesize", 1, 0, 'z' },
+    { "datebefore", 1, 0, 'b'},
+    { "dateafter", 1, 0, 'a'},
     { 0, 0, 0, 0 }
   };
 #define GETOPT getopt_long
@@ -1411,6 +1470,22 @@ int main(int argc, char **argv) {
 	exit(1);
       }
       break;
+    case 'b':
+      datebefore = strtoll(optarg, &endptr, 10);
+      if (optarg[0] == '\0' || *endptr != '\0' || datebefore < 0){
+        errormsg("invalid value for --datebefore: '%s'\n", optarg);
+        exit(1);
+      }
+      break;
+
+    case'a':
+      dateafter = strtoll(optarg, &endptr, 10);
+      if (optarg[0] == '\0' || *endptr != '\0' || dateafter < 0){
+        errormsg("invalid value for --dateafter: '%s'\n", optarg);
+        exit(1);
+      }
+      break;
+
     default:
       fprintf(stderr, "Try `fdupes --help' for more information.\n");
       exit(1);
