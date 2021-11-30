@@ -29,6 +29,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <time.h>
+#include <stdbool.h>
 #ifdef HAVE_GETOPT_H
 #include <getopt.h>
 #endif
@@ -61,9 +62,17 @@ typedef enum {
   ORDER_NAME
 } ordertype_t;
 
+typedef enum {
+  EXT_NONE = 0,
+  EXT_EXCEPT,
+  EXT_WITH
+} exttype_t;
+
 char *program_name;
+char *fextension;
 
 ordertype_t ordertype = ORDER_MTIME;
+exttype_t exttype = EXT_NONE;
 
 #define CHUNK_SIZE 8192
 
@@ -218,6 +227,25 @@ void getfilestats(file_t *file, struct stat *info, struct stat *linfo)
   file->mtime = info->st_mtime;
 }
 
+char* getfileextension(char* fname)
+{
+  int fname_len = strlen(fname);
+  fname += fname_len-1;
+  char *fext;
+
+  fext = (char*)malloc(sizeof(char)*fname_len+1);
+  memset(fext,0x00,sizeof(char)*fname_len+1);
+  for(int i=0;i<fname_len;i++){
+    if(*fname == '.'){
+      fext = fname+1;
+      break;
+    }
+    fname --;
+  }
+
+  return fext;
+}
+
 int grokdir(char *dir, file_t **filelistp, struct stat *logfile_status)
 {
   DIR *cd;
@@ -230,6 +258,7 @@ int grokdir(char *dir, file_t **filelistp, struct stat *logfile_status)
   static int progress = 0;
   static char indicator[] = "-\\|/";
   char *fullname, *name;
+  char *ext;
   cd = opendir(dir);
 
   if (!cd) {
@@ -245,6 +274,7 @@ int grokdir(char *dir, file_t **filelistp, struct stat *logfile_status)
       }
 
       newfile = (file_t*) malloc(sizeof(file_t));
+      ext = (char*)malloc(sizeof(char)*INPUT_SIZE);
 
       if (!newfile) {
 	errormsg("out of memory!\n");
@@ -288,11 +318,13 @@ int grokdir(char *dir, file_t **filelistp, struct stat *logfile_status)
 	  free(newfile->d_name);
 	  free(newfile);
 	  free(fullname);
+	  free(ext);
 	  continue;
 	}
 	free(fullname);
+	free(ext);
       }
-
+     
       if (stat(newfile->d_name, &info) == -1) {
         free(newfile->d_name);
         free(newfile);
@@ -362,6 +394,19 @@ int grokdir(char *dir, file_t **filelistp, struct stat *logfile_status)
         }
       }
 
+      ext = getfileextension(basename(newfile->d_name));
+
+      if (exttype == EXT_EXCEPT && strcasecmp(ext,fextension) == 0){
+	free(newfile->d_name);
+	free(newfile);
+	continue;
+      }
+
+      if (exttype == EXT_WITH && strcasecmp(ext,fextension) != 0){
+	free(newfile->d_name);
+	free(newfile);
+	continue;
+	}
 
  /* ignore logfile */
       if (info.st_dev == logfile_status->st_dev && info.st_ino == logfile_status->st_ino) {
@@ -1295,6 +1340,10 @@ void help_text()
   printf("                         ex) Nov 5 2021 -> 20211105\n");
   printf(" -a --dateafter=DATE     delete dupe files when it's modification time is after the DATE\n");
   printf("                         ex) Nov 5 2021 -> 20211105\n");
+  printf(" -e --exte=EXT           identify duplicate files that exclude the specific extension EXT\n");
+  printf("                         ex) c or .c or *.c\n");
+  printf(" -w --extw=EXT           identify duplicate files that have the specific extension EXT\n");
+  printf("                         ex) c or .c or *.c\n");
 #ifndef HAVE_GETOPT_H
   printf("Note: Long options are not supported in this fdupes build.\n\n");
 #endif
@@ -1352,6 +1401,8 @@ int main(int argc, char **argv) {
     { "filesize", 1, 0, 'z' },
     { "datebefore", 1, 0, 'b'},
     { "dateafter", 1, 0, 'a'},
+    { "exte", 1, 0, 'e'},
+    { "extw", 1, 0, 'w'},
     { 0, 0, 0, 0 }
   };
 #define GETOPT getopt_long
@@ -1486,12 +1537,39 @@ int main(int argc, char **argv) {
       }
       break;
 
+    case 'e':
+      if(optarg[0] == '\0'){
+	errormsg("invalid value for --exte: '%s'\n",optarg);
+	exit(1);
+      }
+      exttype = EXT_EXCEPT;
+      if (optarg[0] == '.'||optarg[0]== '*'){
+	fextension = getfileextension(optarg);
+      } else {
+	fextension = optarg;
+      }
+      printf("[EXCEPT] .%s\n",fextension);
+      break;
+
+    case 'w':
+      if(optarg[0] == '\0'){
+	errormsg("invalid value for --extw: '%s'\n",optarg);
+	exit(1);
+      }
+      exttype = EXT_WITH;
+      if (optarg[0] == '.'||optarg[0]=='*'){
+	fextension = getfileextension(optarg);
+      } else {
+	fextension = optarg;
+      }
+      printf("[WITH] .%s\n",fextension);
+      break;
+
     default:
       fprintf(stderr, "Try `fdupes --help' for more information.\n");
       exit(1);
     }
   }
-
   if (optind >= argc) {
     errormsg("no directories specified\n");
     exit(1);
@@ -1509,7 +1587,6 @@ int main(int argc, char **argv) {
 
   if (!ISFLAG(flags, F_DELETEFILES))
     logfile = 0;
-
   if (logfile != 0)
   {
     loginfo = log_open(logfile, &log_error);
